@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Internall</title>
+    <meta
+      name="description"
+      content="A Mac app where your AI agents live as chats — they search, drive a real browser you can watch, build small apps, and run on a schedule."
+    />
+    <link rel="icon" href="img/icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Public+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="top">
+        <img src="img/icon.png" alt="" />
+        <span class="name">Internall</span>
+        <nav>
+          <a href="#watch">How it works</a>
+          <a href="#get">Get it</a>
+        </nav>
+      </header>
+
+      <!-- ── hero: the product's own moment, played live ── -->
+      <div class="hero">
+        <p class="eyebrow">macOS · iOS · Android</p>
+        <h1>Agents you can <em>watch</em> work.</h1>
+        <p class="lede">
+          Ask one to do something on the web. A real browser opens beside the chat and you see every
+          field it fills.
+        </p>
+
+        <div class="cta-row">
+          <a class="btn btn-primary" href="#get">Download for Mac</a>
+          <span class="cta-note">Free · bring your own OpenAI or Anthropic key</span>
+        </div>
+
+        <div class="window" id="demo">
+          <div class="titlebar">
+            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+            <span class="label">Conference Assistant</span>
+          </div>
+          <div class="stage">
+            <div class="pane-chat"></div>
+            <div class="pane-browser" hidden>
+              <div class="urlbar">
+                <span>←</span><span>→</span>
+                <span class="chip-url">https://northwind.dev</span>
+              </div>
+              <div class="formcard">
+                <div class="fld">
+                  <label for="f-name">Full name</label>
+                  <div class="input" id="f-name" data-field="name"></div>
+                </div>
+                <div class="fld">
+                  <label for="f-email">Email address</label>
+                  <div class="input" id="f-email" data-field="email"></div>
+                </div>
+                <div class="fld">
+                  <label for="f-talk">Talk title</label>
+                  <div class="input" id="f-talk" data-field="talk"></div>
+                </div>
+                <button class="submit" type="button" tabindex="-1">Submit application</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <button class="replay" type="button">Replay</button>
+      </div>
+
+      <!-- ── it uses the page ── -->
+      <section id="watch">
+        <p class="divider reveal">✳︎ &nbsp;the browser</p>
+        <div class="feature reveal">
+          <div>
+            <h2>It doesn't read the page. It uses it.</h2>
+            <p>Reads the form, types, picks, clicks — in a real browser with your logins.</p>
+            <p class="aside">Asks first before anything that submits.</p>
+          </div>
+          <figure>
+            <img
+              src="img/browsing.jpg"
+              alt="Internall with a chat on the left listing each step the agent took, and a browser on the right showing a conference application form that has been filled in and submitted"
+              loading="lazy"
+            />
+          </figure>
+        </div>
+      </section>
+
+      <!-- ── mini apps ── -->
+      <section>
+        <p class="divider reveal">✳︎ &nbsp;answers</p>
+        <div class="feature flip reveal">
+          <div>
+            <h2>Not a list. An app.</h2>
+            <p>Results you'd want to filter arrive as a small app in its own window.</p>
+            <p class="aside">Tap a card, the chat picks it up.</p>
+          </div>
+          <figure>
+            <img
+              src="img/miniapp.jpg"
+              alt="A window titled Pet-friendly rentals in Burnaby showing rental cards with prices, pet policy tags and filter chips"
+              loading="lazy"
+            />
+          </figure>
+        </div>
+      </section>
+
+      <!-- ── picture strip: three shots, almost no words ── -->
+      <section>
+        <p class="divider reveal">✳︎ &nbsp;the rest</p>
+        <div class="strip reveal">
+          <figure>
+            <img src="img/photo.jpg" alt="A chat reply containing a portrait of Ada Lovelace embedded in the message" loading="lazy" />
+            <figcaption><b>Shows you the thing.</b> Finds a real photo and puts it in the message.</figcaption>
+          </figure>
+          <figure>
+            <img src="img/tasks.jpg" alt="A Scheduled panel listing two recurring tasks for one agent with pause and delete buttons" loading="lazy" />
+            <figcaption><b>“Every morning, check the news.”</b> Say it once; it reports back on time.</figcaption>
+          </figure>
+          <figure>
+            <img src="img/rail.jpg" alt="Internall's agent list collapsed to a rail of avatars, two carrying blue unread count badges" loading="lazy" />
+            <figcaption><b>One chat per agent.</b> Unread counts follow you into the collapsed rail.</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <!-- ── short claims ── -->
+      <section>
+        <div class="grid reveal">
+          <div class="cell">
+            <span class="k">AGENTS</span>
+            <h3>Described, not configured</h3>
+            <p>Write what it's for. That's the whole setup.</p>
+          </div>
+          <div class="cell">
+            <span class="k">RECEIPTS</span>
+            <h3>Every step, one tap away</h3>
+            <p>Its work folds into one line you can open.</p>
+          </div>
+          <div class="cell">
+            <span class="k">PRIVACY</span>
+            <h3>Your key, your machine</h3>
+            <p>Straight to OpenAI or Anthropic. No server in between.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── get it ── -->
+      <section id="get">
+        <div class="close-card reveal">
+          <img src="img/icon.png" alt="" width="76" height="76" style="border-radius: 18px" />
+          <h2>Put it in your Dock.</h2>
+          <p>Universal build, macOS 11 or later. Same agents on iOS and Android.</p>
+          <div class="cta-row" style="justify-content: center">
+            <a class="btn btn-primary" href="Internall-0.1.0-universal.dmg" download>Download · 213 MB</a>
+          </div>
+          <p class="cta-note" style="max-width: 44ch">
+            Not notarised yet — first launch needs right-click → Open. Usage is billed by whichever
+            provider you pick.
+          </p>
+        </div>
+
+        <dl class="specs reveal">
+          <div>
+            <dt>Requires</dt>
+            <dd>macOS 11+ <span>· Apple Silicon or Intel</span></dd>
+          </div>
+          <div>
+            <dt>Models</dt>
+            <dd>OpenAI &amp; Anthropic <span>· per agent</span></dd>
+          </div>
+          <div>
+            <dt>Also on</dt>
+            <dd>iOS &amp; Android</dd>
+          </div>
+          <div>
+            <dt>Price</dt>
+            <dd>Free <span>· you pay your provider</span></dd>
+          </div>
+        </dl>
+      </section>
+
+      <footer>
+        <span>Internall — © <span data-year>2026</span></span>
+        <span class="sep">·</span>
+        <span class="mono">built for people who'd rather watch than trust</span>
+      </footer>
+    </div>
+
+    <script src="main.js"></script>
+  </body>
+</html>

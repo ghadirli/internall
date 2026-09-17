@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; frame-src https: http:;" />
+    <title>Slava</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <!-- ─────────────── Sidebar ─────────────── -->
+      <aside class="sidebar">
+        <div class="sidebar-top drag">
+          <div class="search-wrap no-drag">
+            <svg class="search-icon" viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M7 1.5a5.5 5.5 0 1 0 3.36 9.85l3.14 3.15 1.06-1.06-3.15-3.14A5.5 5.5 0 0 0 7 1.5Zm0 1.5a4 4 0 1 1 0 8 4 4 0 0 1 0-8Z"/>
+            </svg>
+            <input id="search" type="search" placeholder="Search" autocomplete="off" />
+          </div>
+          <button id="new-agent" class="icon-btn no-drag" title="New agent (⌘N)" aria-label="New agent">
+            <svg viewBox="0 0 16 16"><path d="M8 2.5v11M2.5 8h11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/></svg>
+          </button>
+        </div>
+
+        <div class="chat-list" id="chat-list"></div>
+
+        <div class="sidebar-foot">
+          <button id="settings-btn" class="ghost-btn">
+            <svg viewBox="0 0 16 16" width="14" height="14"><path fill="currentColor" d="M8 5.5A2.5 2.5 0 1 0 8 10.5 2.5 2.5 0 0 0 8 5.5Zm0 1.5a1 1 0 1 1 0 2 1 1 0 0 1 0-2Z"/><path fill="currentColor" d="m13.4 9.1.9.7c.2.2.3.5.1.8l-.9 1.5c-.2.3-.5.4-.8.3l-1.1-.4c-.3.2-.6.4-1 .5l-.2 1.1c0 .3-.3.5-.6.5H8.2c-.3 0-.6-.2-.6-.5l-.2-1.1c-.4-.1-.7-.3-1-.5l-1.1.4c-.3.1-.6 0-.8-.3l-.9-1.5c-.2-.3-.1-.6.1-.8l.9-.7a4.4 4.4 0 0 1 0-1.1l-.9-.7c-.2-.2-.3-.5-.1-.8l.9-1.5c.2-.3.5-.4.8-.3l1.1.4c.3-.2.6-.4 1-.5l.2-1.1c0-.3.3-.5.6-.5h1.6c.3 0 .6.2.6.5l.2 1.1c.4.1.7.3 1 .5l1.1-.4c.3-.1.6 0 .8.3l.9 1.5c.2.3.1.6-.1.8l-.9.7a4.4 4.4 0 0 1 0 1.1Z" opacity=".55"/></svg>
+            <span>Settings</span>
+          </button>
+          <span id="key-badge" class="key-badge">no key</span>
+        </div>
+      </aside>
+
+      <!-- ─────────────── Chat pane ─────────────── -->
+      <main class="main" id="chat-pane">
+        <header class="chat-header drag">
+          <button id="toggle-sidebar" class="icon-btn no-drag" title="Collapse agent list (⌘\)">
+            <svg viewBox="0 0 16 16"><rect x="1.6" y="2.6" width="12.8" height="10.8" rx="2.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M6.2 2.6v10.8" stroke="currentColor" stroke-width="1.3"/></svg>
+          </button>
+          <div class="ch-avatar" id="ch-avatar">🤖</div>
+          <div class="ch-meta">
+            <div class="ch-name" id="ch-name">Slava</div>
+            <div class="ch-sub" id="ch-sub">select an agent</div>
+          </div>
+          <div class="ch-actions no-drag">
+            <button id="tasks-btn" class="icon-btn" title="Scheduled tasks">
+              <svg viewBox="0 0 16 16"><circle cx="8" cy="8.6" r="5.6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 5.6v3.2l2 1.3M5.4 1.6 3 3.4M10.6 1.6 13 3.4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+              <span class="task-dot hidden" id="task-dot"></span>
+            </button>
+            <button id="edit-agent" class="icon-btn" title="Edit agent">
+              <svg viewBox="0 0 16 16"><path fill="currentColor" d="M11.5 1.6 14.4 4.5 6 12.9l-3.6.7.7-3.6 8.4-8.4Zm0 2.1L4.4 10.8l-.3 1.4 1.4-.3 7.1-7.1-1.1-1.1Z"/></svg>
+            </button>
+            <button id="open-browser" class="icon-btn" title="Browser (⌘B)">
+              <svg viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.3" d="M8 1.6a6.4 6.4 0 1 1 0 12.8A6.4 6.4 0 0 1 8 1.6Zm0 0c1.8 1.5 2.7 3.6 2.7 6.4S9.8 12.9 8 14.4c-1.8-1.5-2.7-3.6-2.7-6.4S6.2 3.1 8 1.6ZM1.9 6.2h12.2M1.9 9.8h12.2"/></svg>
+            </button>
+          </div>
+        </header>
+
+        <div class="messages" id="messages"></div>
+
+        <footer class="composer">
+          <div class="composer-box">
+            <textarea id="input" rows="1" placeholder="Message" spellcheck="true"></textarea>
+            <button id="send" class="send-btn" title="Send">
+              <svg viewBox="0 0 20 20"><path fill="currentColor" d="M2.6 17.4 18.5 10 2.6 2.6l.1 5.8L13.3 10 2.7 11.6l-.1 5.8Z"/></svg>
+            </button>
+            <button id="stop" class="send-btn stop hidden" title="Stop">
+              <svg viewBox="0 0 20 20"><rect x="6" y="6" width="8" height="8" rx="1.5" fill="currentColor"/></svg>
+            </button>
+          </div>
+        </footer>
+      </main>
+
+      <!-- ─────────────── Browser pane ─────────────── -->
+      <div class="divider hidden" id="divider"></div>
+      <section class="main browser-pane hidden" id="browser-pane">
+        <div class="agent-driving hidden" id="agent-driving">
+          <span class="pulse"></span><span id="agent-driving-text">agent is working…</span>
+        </div>
+        <header class="browser-bar drag">
+          <div class="nav-btns no-drag">
+            <button id="b-back" class="icon-btn" title="Back"><svg viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M10 3 5 8l5 5"/></svg></button>
+            <button id="b-fwd" class="icon-btn" title="Forward"><svg viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="m6 3 5 5-5 5"/></svg></button>
+            <button id="b-reload" class="icon-btn" title="Reload"><svg viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.4" d="M13 8a5 5 0 1 1-1.6-3.7M13 2.5V6H9.5"/></svg></button>
+          </div>
+          <input id="b-url" class="url-bar no-drag" type="text" spellcheck="false" placeholder="Search or enter address" />
+          <div class="nav-btns no-drag">
+            <button id="b-external" class="icon-btn" title="Open in Safari"><svg viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.4" d="M9 2h5v5M14 2 7.5 8.5M12 9.5V13a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3.5"/></svg></button>
+            <button id="b-close" class="icon-btn" title="Back to chat"><svg viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" d="M4 4l8 8M12 4l-8 8"/></svg></button>
+          </div>
+        </header>
+        <div class="webview-wrap">
+          <webview id="webview" src="https://duckduckgo.com" partition="persist:slava-browser" allowpopups></webview>
+        </div>
+      </section>
+    </div>
+
+    <!-- ─────────────── Agent editor modal ─────────────── -->
+    <div class="overlay hidden" id="agent-modal">
+      <div class="modal">
+        <h2 id="modal-title">New agent</h2>
+
+        <div class="avatar-row">
+          <div class="avatar-preview" id="avatar-preview">🤖</div>
+          <div class="pickers">
+            <button id="shuffle-avatar" class="ghost-btn shuffle" type="button">🎲 Shuffle picture</button>
+            <div class="emoji-row" id="emoji-row"></div>
+            <div class="color-row" id="color-row"></div>
+          </div>
+        </div>
+
+        <label class="field">
+          <span>Name</span>
+          <input id="f-name" type="text" placeholder="e.g. Market Analyst" maxlength="40" />
+        </label>
+
+        <label class="field">
+          <span>What does this agent do?</span>
+          <textarea id="f-desc" rows="5" placeholder="Describe the agent's job, tone and rules. This becomes its system prompt — the more specific, the better."></textarea>
+        </label>
+
+        <div class="two-col">
+          <label class="field">
+            <span>Provider</span>
+            <select id="f-provider">
+              <option value="openai">OpenAI</option>
+              <option value="anthropic">Anthropic</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Model</span>
+            <select id="f-model"></select>
+          </label>
+        </div>
+
+        <div class="field">
+          <span>Abilities</span>
+          <label class="toggle"><input type="checkbox" id="f-web" checked /><i></i>
+            <div><b>Internet access</b><small>Search the web and read pages</small></div>
+          </label>
+          <label class="toggle"><input type="checkbox" id="f-browser" checked /><i></i>
+            <div><b>Browser control</b><small>Open pages, fill forms and click in the side browser</small></div>
+          </label>
+          <label class="toggle"><input type="checkbox" id="f-apps" checked /><i></i>
+            <div><b>Build mini-apps</b><small>Show results as an interactive app in its own window</small></div>
+          </label>
+          <label class="toggle"><input type="checkbox" id="f-tasks" checked /><i></i>
+            <div><b>Scheduled tasks</b><small>Can remember jobs and run them on a schedule</small></div>
+          </label>
+          <label class="toggle"><input type="checkbox" id="f-confirm" checked /><i></i>
+            <div><b>Ask before submitting</b><small>Approve any click that submits, buys or deletes</small></div>
+          </label>
+        </div>
+
+        <div class="modal-actions">
+          <button id="f-delete" class="danger-btn hidden">Delete</button>
+          <div class="spacer"></div>
+          <button id="f-cancel" class="ghost-btn">Cancel</button>
+          <button id="f-save" class="primary-btn">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─────────────── Scheduled tasks modal ─────────────── -->
+    <div class="overlay hidden" id="tasks-modal">
+      <div class="modal">
+        <h2 id="tasks-title">Scheduled tasks</h2>
+        <div id="tasks-list"></div>
+        <p class="hint" id="tasks-elsewhere"></p>
+        <p class="hint" style="margin-top:14px">
+          Ask an agent in plain language — “every morning at 7, check the news and summarise it” —
+          and it will schedule itself. Tasks keep running until you pause or delete them here.
+        </p>
+        <div class="modal-actions">
+          <div class="spacer"></div>
+          <button id="tasks-close" class="primary-btn">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─────────────── Settings modal ─────────────── -->
+    <div class="overlay hidden" id="settings-modal">
+      <div class="modal">
+        <h2>Settings</h2>
+        <div class="field">
+          <span>OpenAI API key <em id="s-openai-state" class="state"></em></span>
+          <div class="key-row">
+            <input id="s-openai" type="password" placeholder="sk-..." spellcheck="false" />
+            <button class="ghost-btn test" data-provider="openai">Test</button>
+          </div>
+          <small class="hint" id="s-openai-hint">From platform.openai.com → API keys. Used for GPT models, web search and browser tools.</small>
+        </div>
+        <div class="field">
+          <span>Anthropic API key <em id="s-anthropic-state" class="state"></em></span>
+          <div class="key-row">
+            <input id="s-anthropic" type="password" placeholder="sk-ant-..." spellcheck="false" />
+            <button class="ghost-btn test" data-provider="anthropic">Test</button>
+          </div>
+          <small class="hint" id="s-anthropic-hint">Optional. From console.anthropic.com. Keys are encrypted with your macOS Keychain; leave a field blank to keep what's saved.</small>
+        </div>
+        <label class="field">
+          <span>Appearance</span>
+          <select id="s-theme">
+            <option value="system">Match system</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </label>
+        <div class="modal-actions">
+          <div class="spacer"></div>
+          <button id="s-cancel" class="ghost-btn">Cancel</button>
+          <button id="s-save" class="primary-btn">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

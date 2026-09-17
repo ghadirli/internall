@@ -1,0 +1,71 @@
+{
+  "name": "internall",
+  "productName": "Internall",
+  "version": "0.1.0",
+  "description": "A messaging app for your own AI agents \u2014 web access, a browser they drive in front of you, mini-apps and scheduled tasks.",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "icon": "node scripts/make-icon.js",
+    "dist": "npm run icon && electron-builder --mac",
+    "dist:local": "npm run icon && electron-builder --mac --arm64 -c.mac.target=dmg"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.120.0",
+    "openai": "^7.5.0"
+  },
+  "devDependencies": {
+    "electron": "^43.4.1",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.internall.app",
+    "productName": "Internall",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "afterPack": "scripts/ad-hoc-sign.js",
+    "files": [
+      "main.js",
+      "preload.js",
+      "app-preload.js",
+      "renderer/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.icns",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "identity": null,
+      "darkModeSupport": true,
+      "extendInfo": {
+        "LSMinimumSystemVersion": "11.0"
+      }
+    },
+    "dmg": {
+      "title": "Slava",
+      "contents": [
+        {
+          "x": 140,
+          "y": 200,
+          "type": "file"
+        },
+        {
+          "x": 400,
+          "y": 200,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    }
+  }
+}
