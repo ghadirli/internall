@@ -203,8 +203,13 @@ sound alike and changeable in the agent editor, where **Hear it** plays a sample
 **Hands-free** — the ear icon in the chat header. With it on, say *"hello Kallax, add milk to the
 list"* and that chat opens and gets the message. The agent then stays in conversation with you for
 45 seconds after each exchange, so you can keep talking without repeating its name; *"that's all"*
-or *"goodbye"* ends it early, and the composer line tells you who you are talking to.
+or *"goodbye"* ends it early, and the composer line tells you who you are talking to. A farewell has
+to be the whole sentence to count — *"that's all the stock I own, what next"* is a question, not a
+goodbye.
 
+- **Calling someone else switches to them.** The name is checked before the running
+  conversation, so "hello japan visa" opens that chat even if you were mid-sentence with another
+  agent. Without a name, what you say stays with whoever you are already talking to.
 - **Your turn ends when you stop talking.** A pause of 0.9s closes it — short enough to feel
   responsive, long enough to think mid-sentence without being cut off. Utterances cap at 20s.
 - **Nothing leaves the machine until it sounds like speech.** The microphone is watched locally

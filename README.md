@@ -41,7 +41,8 @@ chip, and anything consequential — here, clicking “Submit application” —
   chat and takes the rest of the sentence as your message. Turn-taking is decided locally: an
   analyser node watches the microphone and only a stretch that is loud enough, holds for 250ms and
   carries 400ms of voiced time is ever transcribed, so a quiet room costs nothing. Names are
-  matched phonetically, because transcription renders *gyubee* as "goo bee".
+  matched phonetically, because transcription renders *gyubee* as "goo bee", and naming a different
+  agent mid-conversation switches to its chat.
 - **Voice that starts before the sentence ends.** Hold to talk; the recording is transcribed and
   sent on release. The reply is spoken back in a voice derived from the agent's id, and speech is
   requested a sentence at a time *while the answer is still streaming* — chunks fetched in

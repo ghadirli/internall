@@ -2192,36 +2192,53 @@ function handsFinish() {
   }
 }
 
+/** Split out so the decision below can be exercised without a microphone. */
+async function transcribeBlob(blob) {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  return window.internall.transcribe(bytes, hands.recMime);
+}
+
 async function handsHeard(blob) {
   if (!blob.size) return;
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  const res = await window.internall.transcribe(bytes, hands.recMime);
+  const res = await transcribeBlob(blob);
   if (res?.error) return voiceTrouble(res.error);
 
   const text = (res?.text || '').trim();
   if (!text) return;
 
-  // Already talking to someone — anything you say goes to them.
-  if (inConversation()) {
-    if (isFarewell(text)) {
-      hands.lockId = null;
-      return setHandsNote();
-    }
-    hands.lockUntil = Date.now() + VAD.CONVERSATION_MS;
-    return handsSay(hands.lockId, text);
+  const move = routeUtterance(text);
+
+  if (move.kind === 'end') {
+    hands.lockId = null;
+    return setHandsNote();
   }
+  if (move.kind === 'ignore') return; // not addressed to anyone here
 
-  const hit = matchWake(text, agents);
-  if (!hit) return; // not addressed to anyone here; stay quiet and keep listening
-
-  hands.lockId = hit.agent.id;
+  hands.lockId = move.agentId;
   hands.lockUntil = Date.now() + VAD.CONVERSATION_MS;
-  if (hit.agent.id !== activeId) selectAgent(hit.agent.id);
+  // Calling an agent by name opens its chat, whoever you were talking to before.
+  if (move.agentId !== activeId) selectAgent(move.agentId);
   setHandsNote();
 
   // "hello kallax, what's on my list" — the greeting opens the chat and the
   // rest of the sentence is the first thing you said to it.
-  if (hit.rest) await handsSay(hit.agent.id, hit.rest);
+  if (move.text) await handsSay(move.agentId, move.text);
+}
+
+/* Who did that go to?
+
+   The name is checked before the running conversation, so calling someone else
+   switches to them rather than reading their name out to the agent you happened
+   to be mid-sentence with. Without a name it stays with whoever you are already
+   talking to. */
+function routeUtterance(text) {
+  if (inConversation() && isFarewell(text)) return { kind: 'end' };
+
+  const hit = matchWake(text, agents);
+  if (hit) return { kind: 'summon', agentId: hit.agent.id, text: hit.rest };
+
+  if (inConversation()) return { kind: 'continue', agentId: hands.lockId, text };
+  return { kind: 'ignore' };
 }
 
 async function handsSay(agentId, text) {
@@ -2231,8 +2248,33 @@ async function handsSay(agentId, text) {
   await sendText(agentId, text);
 }
 
-const isFarewell = (t) =>
-  /^\s*(that'?s all|thanks,? that'?s all|goodbye|bye|stop listening|never ?mind|nothing)\b/i.test(t);
+/* Ending the conversation.
+
+   A farewell has to be the whole utterance, not merely how it starts: "that is
+   all the stock I own, what next" opens with one and is plainly not one, and
+   "by the way" reaches us transcribed as "bye the way". So politeness is peeled
+   off both ends and what remains must match exactly. */
+const FAREWELL_CORE =
+  /^(thats all|that is all|thats it|that is it|thatll be all|that will be all|goodbye|good bye|bye|see you( later)?|stop listening|were done|we are done|im done|i am done|all done|never ?mind|nothing else|no more)$/;
+
+const FAREWELL_PAD_START = /^(ok|okay|alright|right|well|so|and|thanks|thank you|cheers)\s+/;
+const FAREWELL_PAD_END = /\s+(thanks|thank you|please|now|then|cheers|mate)$/;
+
+function isFarewell(text) {
+  let s = String(text || '')
+    .toLowerCase()
+    .replace(/['\u2019]/g, '')        // "that's" and "that\u2019s" alike
+    .replace(/[^a-z\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  for (let i = 0; i < 3; i++) {
+    const before = s;
+    s = s.replace(FAREWELL_PAD_START, '').replace(FAREWELL_PAD_END, '').trim();
+    if (s === before) break;
+  }
+  return FAREWELL_CORE.test(s);
+}
 
 /* ── Hearing your own agent's name ──
    Transcription mangles invented names — "gyubee" comes back as "goo bee" and
