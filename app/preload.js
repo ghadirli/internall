@@ -34,6 +34,10 @@ contextBridge.exposeInMainWorld('internall', {
   toggleTask: (id) => ipcRenderer.invoke('tasks:toggle', id),
   respondConfirm: (id, ok) => ipcRenderer.invoke('confirm:respond', { id, ok }),
   setTheme: (theme) => ipcRenderer.invoke('theme:set', theme),
+
+  voiceInfo: () => ipcRenderer.invoke('voice:info'),
+  transcribe: (data, mime) => ipcRenderer.invoke('voice:transcribe', { data, mime }),
+  speak: (text, voice) => ipcRenderer.invoke('voice:speak', { text, voice }),
   openExternal: (url) => ipcRenderer.invoke('shell:open', url),
 
   onStreamStart: on('stream:start'),

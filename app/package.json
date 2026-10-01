@@ -48,7 +48,8 @@
       "identity": null,
       "darkModeSupport": true,
       "extendInfo": {
-        "LSMinimumSystemVersion": "11.0"
+        "LSMinimumSystemVersion": "11.0",
+        "NSMicrophoneUsageDescription": "Internall records your voice only while you hold the microphone button, so your agents can hear you."
       }
     },
     "dmg": {

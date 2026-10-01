@@ -485,6 +485,52 @@ details.activity .steps .chip { margin: 5px 0; box-shadow: none; }
 .send-btn:disabled { opacity: .35; transform: none; cursor: default; }
 .send-btn.stop { background: var(--danger); }
 
+/* The mic sits inside the composer as a quieter sibling of Send: held down
+   while you speak, so its three states have to be readable at a glance. */
+.mic-btn {
+  width: 34px; height: 34px; flex: 0 0 34px;
+  border-radius: 50%; display: grid; place-items: center;
+  background: transparent; color: var(--text-dim);
+  transition: background .14s, color .14s, transform .12s;
+}
+.mic-btn svg { width: 17px; height: 17px; }
+.mic-btn:hover { background: var(--hover); color: var(--text); }
+.mic-btn:active { transform: scale(.94); }
+
+.mic-btn.listening {
+  background: var(--danger); color: #fff;
+  animation: mic-pulse 1.5s ease-in-out infinite;
+}
+.mic-btn.thinking { color: var(--accent); }
+.mic-btn.thinking svg { animation: mic-fade .9s ease-in-out infinite; }
+
+@keyframes mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(198, 40, 40, .55); }
+  70%      { box-shadow: 0 0 0 9px rgba(198, 40, 40, 0); }
+}
+@keyframes mic-fade {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .35; }
+}
+
+/* The header speaker only appears for an agent that talks, and leans on the
+   accent colour while sound is actually coming out. */
+.icon-btn.speaking { color: var(--accent); }
+
+.voice-row { display: flex; gap: 8px; align-items: center; margin: 10px 0 2px; }
+.voice-row select {
+  flex: 1;
+  padding: 9px 11px;
+  border-radius: 10px;
+  border: 1px solid var(--sidebar-border);
+  background: var(--panel-2);
+  color: var(--text); font: inherit;
+  outline: none;
+  transition: border-color .15s;
+}
+.voice-row select:focus { border-color: var(--accent); outline: none; }
+.voice-row .ghost-btn { flex: 0 0 auto; }
+
 /* ─────────────────────────  Browser  ───────────────────────── */
 
 /* The browser docks beside the chat rather than replacing it, so the user can

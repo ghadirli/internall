@@ -263,12 +263,14 @@ function scheduleDraftSave() {
 function selectAgent(id) {
   if (id === activeId) return;
   stashDraft();
+  stopSpeaking(); // leaving a chat stops the voice that belonged to it
   activeId = id;
   window.internall.activateAgent(id);
   renderList();
   renderChat();
   refreshTasks();
   restoreDraft();
+  syncMuteBtn();
   $('input').focus();
 }
 
@@ -550,7 +552,10 @@ input.addEventListener('keydown', (e) => {
 });
 
 $('send').onclick = sendMessage;
-$('stop').onclick = () => window.internall.stop(activeId);
+$('stop').onclick = () => {
+  stopSpeaking();
+  window.internall.stop(activeId);
+};
 
 async function sendMessage() {
   const agent = agentById(activeId);
@@ -562,6 +567,8 @@ async function sendMessage() {
   clearTimeout(draftTimer);
   agent.draft = '';
   window.internall.saveDraft(agent.id, '');
+
+  stopSpeaking(); // asking something new cuts off the previous answer
 
   const msg = await window.internall.send(agent.id, text);
   if (!msg) return;
@@ -664,6 +671,10 @@ function flushTyping() {
 window.internall.onStreamStart(({ agentId }) => {
   streaming.add(agentId);
   if (agentId === activeId) {
+    // Only the chat you are looking at speaks: a scheduled task finishing in
+    // another chat should not start talking over the one in front of you.
+    // Called unconditionally so a silent agent clears the previous voice.
+    speakStart(agentById(agentId));
     openGroup($('messages'), Date.now());
     setSub(agentById(agentId));
     scrollDown();
@@ -699,8 +710,10 @@ window.internall.onStreamBlock(({ agentId, kind }) => {
 window.internall.onStreamDelta(({ agentId, kind, text }) => {
   if (agentId !== activeId || !live) return;
   // Buffer only — the typewriter loop above decides when it appears.
-  if (kind === 'text' && live.textEl) live.raw += text;
-  else if (kind === 'thinking' && live.thinkEl) live.thinkRaw += text;
+  if (kind === 'text' && live.textEl) {
+    live.raw += text;
+    speakFeed(text);
+  } else if (kind === 'thinking' && live.thinkEl) live.thinkRaw += text;
 });
 
 window.internall.onStreamTool(({ agentId, name, input, phase }) => {
@@ -716,6 +729,7 @@ window.internall.onStreamTool(({ agentId, name, input, phase }) => {
 window.internall.onStreamMessage(({ agentId, message }) => {
   const agent = agentById(agentId);
   if (agent) agent.messages.push(message);
+  if (agentId === activeId) speakFlush();
   if (agent && agentId === activeId && windowFocused) {
     agent.lastReadTs = Date.now(); // you're watching it arrive
     window.internall.markRead(agentId);
@@ -1262,6 +1276,8 @@ function openAgentModal(agent) {
   $('f-confirm').checked = agent ? agent.tools?.confirm !== false : true;
   $('f-apps').checked = agent ? agent.tools?.apps !== false : true;
   $('f-tasks').checked = agent ? agent.tools?.tasks !== false : true;
+  $('f-speak').checked = agent ? Boolean(agent.voice?.speak) : true;
+  fillVoices($('f-voice'), agent?.voice?.name);
   pickedEmoji = agent?.emoji || EMOJIS[Math.floor(Math.random() * EMOJIS.length)];
   pickedColor = agent?.color || COLORS[Math.floor(Math.random() * COLORS.length)];
   // New agents get a fresh random picture; existing ones keep the face they have.
@@ -1276,7 +1292,10 @@ function openAgentModal(agent) {
 
 $('new-agent').onclick = () => openAgentModal(null);
 $('edit-agent').onclick = () => activeId && openAgentModal(agentById(activeId));
-$('f-cancel').onclick = () => $('agent-modal').classList.add('hidden');
+$('f-cancel').onclick = () => {
+  stopSpeaking();
+  $('agent-modal').classList.add('hidden');
+};
 
 $('f-save').onclick = async () => {
   const name = $('f-name').value.trim();
@@ -1297,6 +1316,7 @@ $('f-save').onclick = async () => {
       apps: $('f-apps').checked,
       tasks: $('f-tasks').checked,
     },
+    voice: { speak: $('f-speak').checked, name: $('f-voice').value },
   };
   agents = await window.internall.saveAgent(agent);
   if (!editingId) activeId = agents[0].id;
@@ -1649,3 +1669,302 @@ function markdown(src) {
 
   return s.replace(/\0(\d+)\0/g, (_m, i) => codes[+i]);
 }
+
+/* ──────────────────────────  Voice  ──────────────────────────
+
+   Two halves, both over OpenAI — hold the mic to talk, and the agent answers
+   out loud. Speech is requested per sentence while the reply is still
+   streaming, so it starts talking a second or two in rather than after the
+   whole answer has landed; the chunks are fetched in parallel and played in
+   order, which is why each one carries its own slot in the queue.           */
+
+let voiceInfo = { voices: [], defaultVoice: 'coral', ready: false };
+let muted = localStorage.getItem('voice-muted') === '1';
+
+window.internall.voiceInfo().then((info) => {
+  voiceInfo = info;
+  fillVoices($('f-voice'), voiceInfo.defaultVoice);
+  syncMuteBtn();
+});
+
+const voiceOf = (agent) => agent?.voice?.name || voiceInfo.defaultVoice;
+const speaksAloud = (agent) => Boolean(agent?.voice?.speak) && !muted && voiceInfo.ready;
+
+function fillVoices(sel, picked) {
+  if (!sel) return;
+  sel.innerHTML = voiceInfo.voices
+    .map((v) => `<option value="${v}">${v[0].toUpperCase()}${v.slice(1)}</option>`)
+    .join('');
+  sel.value = voiceInfo.voices.includes(picked) ? picked : voiceInfo.defaultVoice;
+}
+
+/* ── Hearing it ── */
+
+const speech = {
+  slots: [],      // { promise } in the order they should be heard
+  draining: false,
+  audio: null,
+  token: 0,       // bumped by stop(), so stale chunks never reach the speaker
+  buf: '',        // text streamed in but not yet long enough to be worth saying
+  said: 0,        // chunks spoken so far in this reply
+  voice: null,
+};
+
+/* The first thing said should land fast, so the opening clause goes out as soon
+   as there is one; after that, longer chunks sound less chopped up than a
+   stream of short ones. */
+const FIRST_SPOKEN_CHUNK = 40;
+const MIN_SPOKEN_CHUNK = 110;
+
+function speakStart(agent) {
+  speech.voice = speaksAloud(agent) ? voiceOf(agent) : null;
+  speech.buf = '';
+  speech.said = 0;
+}
+
+/** Feed streamed text in; whole sentences are peeled off and queued. */
+function speakFeed(text) {
+  if (!speech.voice) return;
+  speech.buf += text;
+
+  for (;;) {
+    const cut = sentenceCut(speech.buf);
+    if (cut < 0) break;
+    enqueueSpeech(speech.buf.slice(0, cut).trim());
+    speech.buf = speech.buf.slice(cut);
+  }
+}
+
+/** Say whatever is left over once the reply is complete. */
+function speakFlush() {
+  if (!speech.voice) return;
+  const rest = speech.buf.trim();
+  speech.buf = '';
+  if (rest) enqueueSpeech(rest);
+}
+
+/** Index just past the end of the first sentence worth speaking, or -1. */
+function sentenceCut(s) {
+  const re = /[.!?…]["')\]]*(\s|$)|\n{2,}/g;
+  let m;
+  while ((m = re.exec(s))) {
+    const end = m.index + m[0].length;
+    if (end >= (speech.said ? MIN_SPOKEN_CHUNK : FIRST_SPOKEN_CHUNK)) return end;
+  }
+  return s.length > 600 ? 600 : -1; // a wall of text with no punctuation still gets said
+}
+
+function enqueueSpeech(text) {
+  if (!text || muted) return;
+  speech.said++;
+  const token = speech.token;
+  const slot = {
+    promise: window.internall.speak(text, speech.voice).then((res) => (token === speech.token ? res : null)),
+  };
+  speech.slots.push(slot);
+  drainSpeech();
+}
+
+async function drainSpeech() {
+  if (speech.draining) return;
+  speech.draining = true;
+  const token = speech.token;
+
+  try {
+    while (speech.slots.length) {
+      const slot = speech.slots.shift();
+      const res = await slot.promise;
+      if (token !== speech.token) return; // stopped while this was in flight
+      if (!res) continue;
+      if (res.error) {
+        voiceTrouble(res.error);
+        return;
+      }
+      if (res.audio) await playClip(res.audio, token);
+    }
+  } finally {
+    if (token === speech.token) {
+      speech.draining = false;
+      syncMuteBtn();
+    }
+  }
+}
+
+function playClip(bytes, token) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/mpeg' }));
+    const audio = new Audio(url);
+    speech.audio = audio;
+    syncMuteBtn();
+    // A stop() while this clip is playing invalidates the token; the poller
+    // notices and cuts it off mid-word, which is what you want when you have
+    // started talking over it.
+    const poll = setInterval(() => {
+      if (token === speech.token) return;
+      audio.pause();
+      done();
+    }, 120);
+
+    const done = () => {
+      clearInterval(poll);
+      URL.revokeObjectURL(url);
+      if (speech.audio === audio) speech.audio = null;
+      resolve();
+    };
+    audio.onended = done;
+    audio.onerror = done;
+    audio.play().catch(done);
+  });
+}
+
+function stopSpeaking() {
+  speech.token++;
+  speech.slots = [];
+  speech.buf = '';
+  speech.draining = false;
+  if (speech.audio) {
+    speech.audio.pause();
+    speech.audio = null;
+  }
+  syncMuteBtn();
+}
+
+/* ── Saying something ── */
+
+const mic = $('mic');
+let recorder = null;
+let recStream = null;
+let recChunks = [];
+let recState = 'idle'; // idle | listening | thinking
+
+function setRecState(state, note) {
+  recState = state;
+  mic.classList.toggle('listening', state === 'listening');
+  mic.classList.toggle('thinking', state === 'thinking');
+  input.placeholder =
+    note || (state === 'listening' ? 'Listening… release to send' : state === 'thinking' ? 'Transcribing…' : 'Message');
+}
+
+async function startTalking() {
+  if (recState !== 'idle' || !activeId) return;
+  if (!voiceInfo.ready) return voiceTrouble('Voice needs an OpenAI key — add one in Settings.');
+
+  try {
+    recStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+  } catch {
+    return voiceTrouble('No microphone access. Allow it in System Settings → Privacy & Security → Microphone.');
+  }
+
+  // The agent talking over you would end up in your own recording.
+  stopSpeaking();
+
+  recChunks = [];
+  recorder = new MediaRecorder(recStream, pickRecorderMime());
+  recorder.ondataavailable = (e) => e.data.size && recChunks.push(e.data);
+  recorder.onstop = finishTalking;
+  recorder.start();
+  setRecState('listening');
+}
+
+function pickRecorderMime() {
+  for (const type of ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4']) {
+    if (window.MediaRecorder?.isTypeSupported?.(type)) return { mimeType: type };
+  }
+  return {};
+}
+
+function stopTalking() {
+  if (recState !== 'listening' || !recorder) return;
+  setRecState('thinking');
+  try {
+    recorder.stop();
+  } catch {
+    releaseMic();
+    setRecState('idle');
+  }
+}
+
+function releaseMic() {
+  recStream?.getTracks().forEach((t) => t.stop());
+  recStream = null;
+  recorder = null;
+}
+
+async function finishTalking() {
+  const type = recorder?.mimeType || 'audio/webm';
+  const blob = new Blob(recChunks, { type });
+  recChunks = [];
+  releaseMic();
+
+  if (!blob.size) return setRecState('idle');
+
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const res = await window.internall.transcribe(bytes, type);
+  setRecState('idle');
+
+  if (res?.error) return voiceTrouble(res.error);
+  const text = (res?.text || '').trim();
+  if (!text) return voiceTrouble('Did not catch that.');
+
+  input.value = input.value.trim() ? `${input.value.trim()} ${text}` : text;
+  input.dispatchEvent(new Event('input'));
+  sendMessage();
+}
+
+/** Say what went wrong in the composer rather than throwing up a dialog. */
+function voiceTrouble(message) {
+  setRecState('idle', message);
+  input.placeholder = message;
+  setTimeout(() => {
+    if (recState === 'idle') input.placeholder = 'Message';
+  }, 4200);
+}
+
+/* ── Wiring ── */
+
+mic.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  startTalking();
+});
+['pointerup', 'pointercancel', 'pointerleave'].forEach((ev) =>
+  mic.addEventListener(ev, () => stopTalking())
+);
+
+/* Hold ⌥ anywhere in the window as the hands-off version of the same thing.
+   Option is a modifier on its own, so holding it cannot swallow a keystroke
+   the composer wanted. */
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Alt' && !e.repeat && !$('agent-modal').matches(':not(.hidden)')) startTalking();
+});
+document.addEventListener('keyup', (e) => {
+  if (e.key === 'Alt') stopTalking();
+});
+window.addEventListener('blur', () => stopTalking());
+
+$('mute').onclick = () => {
+  muted = !muted;
+  localStorage.setItem('voice-muted', muted ? '1' : '0');
+  if (muted) stopSpeaking();
+  syncMuteBtn();
+};
+
+function syncMuteBtn() {
+  const btn = $('mute');
+  if (!btn) return;
+  const agent = agentById(activeId);
+  const relevant = voiceInfo.ready && Boolean(agent?.voice?.speak);
+  btn.classList.toggle('hidden', !relevant);
+  btn.classList.toggle('speaking', Boolean(speech.audio) && !muted);
+  btn.title = muted ? 'Voice muted — click to unmute' : 'Mute voice';
+  $('mute-waves')?.classList.toggle('hidden', muted);
+  $('mute-slash')?.classList.toggle('hidden', !muted);
+}
+
+$('f-voice-try').onclick = async () => {
+  const name = $('f-voice').value;
+  stopSpeaking();
+  speech.voice = name;
+  enqueueSpeech(`Hello — I'm ${$('f-name').value.trim() || 'your new agent'}, and this is how I sound.`);
+};

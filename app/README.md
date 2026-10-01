@@ -177,6 +177,29 @@ survive quitting; a ticker checks every 30s and fires them.
   other chats have their own. Pause, resume or delete any of them. The agent can also list and
   cancel its own with `list_tasks` / `cancel_task`, so "move it to 8am" works in conversation.
 
+**Voice** (per agent toggle, on by default) — hold the microphone button in the composer, or
+hold **⌥** anywhere in the window, and talk. Releasing transcribes what you said and sends it.
+The reply is read back aloud in the agent's own voice, picked from its id so two chats rarely
+sound alike and changeable in the agent editor, where **Hear it** plays a sample.
+
+- **It starts talking before the answer is finished.** Speech is requested a sentence at a time
+  while the reply is still streaming — the opening clause goes out as soon as there is one, then
+  longer chunks, fetched in parallel and played in order. Waiting for the whole answer would add
+  several seconds of silence to anything long.
+- **Interrupting works.** Holding the mic, sending a new message, pressing Stop or leaving the
+  chat cuts the voice off mid-word, and the speaker icon in the header mutes it for good.
+- **Only the chat you're looking at speaks** — a scheduled task finishing in another chat stays
+  quiet rather than talking over the one in front of you.
+- **Markdown is stripped before it is spoken**, so code fences, link URLs and emphasis markers
+  don't get read out as punctuation.
+- **Both halves go through OpenAI.** Anthropic publishes no audio API, so a Claude agent still
+  needs an OpenAI key to be talked to; without one the composer says so instead of failing
+  silently. Transcription falls back from `gpt-4o-transcribe` to `whisper-1`, and speech from
+  `gpt-4o-mini-tts` to `tts-1`, if the account lacks the newer model.
+- **The microphone is reachable from the chat window and nowhere else.** A permission handler
+  grants it to the main window only and denies it to the browser panel and to mini-apps, so a
+  site the agent visits cannot put a microphone prompt in front of you wearing the app's face.
+
 **Browser panel** — ⌘B, or the globe icon in the chat header. Back / forward / reload, an
 address bar (a non-URL is searched on DuckDuckGo), "open in Safari", and a draggable divider to
 resize it. It keeps its own persistent session, so sites you log into stay logged in — which is
@@ -194,6 +217,7 @@ here too. You can take over and use it yourself at any time.
 | ⌘, | Settings |
 | ⌘⌫ | Clear the current conversation |
 | ⏎ / ⇧⏎ | Send / newline |
+| hold ⌥ | Talk to the agent |
 
 ## Layout
 

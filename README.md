@@ -3,9 +3,12 @@
 A messaging app for your own AI agents — on macOS, iOS and Android.
 
 Each agent is a chat in the sidebar. It has its own description, which becomes its system prompt,
-its own provider and model (OpenAI or Anthropic, chosen per agent), and its own set of abilities:
-searching the web, driving the app's built-in browser while you watch, building small interactive
-apps, and scheduling work to run later without being asked again.
+its own provider and model (OpenAI or Anthropic, chosen per agent), its own voice, and its own set
+of abilities: searching the web, driving the app's built-in browser while you watch, building small
+interactive apps, and scheduling work to run later without being asked again.
+
+You can type to an agent or talk to it — hold the mic button, or hold ⌥, and it answers out loud.
+Voice is on the desktop app for now; the phone version is still text only.
 
 There is no server in the middle. Requests go from your machine straight to the provider, and your
 API keys are encrypted by the OS — the macOS Keychain on desktop, the iOS Keychain and Android
@@ -33,6 +36,12 @@ chip, and anything consequential — here, clicking “Submit application” —
   `window.internall.send("…")` posts a message into the conversation, so an “Ask about this one”
   button continues the chat. The HTML is stored on disk and deliberately kept out of the
   transcript, so it is never re-sent to the model.
+- **Voice that starts before the sentence ends.** Hold to talk; the recording is transcribed and
+  sent on release. The reply is spoken back in a voice derived from the agent's id, and speech is
+  requested a sentence at a time *while the answer is still streaming* — chunks fetched in
+  parallel, played in order — so it begins talking a second or two in rather than after the whole
+  answer has landed. The microphone is granted to the chat window alone and explicitly denied to
+  the browser panel, so a site the agent visits can never ask for it.
 - **A scheduler that outlives the process.** Relative (“in two minutes”), one-shot, daily,
   weekdays, weekly and interval jobs, persisted to disk, with a six-hour grace window so a job
   missed while the app was closed still runs on the next launch. When one finishes it raises a

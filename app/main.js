@@ -8,6 +8,7 @@ const AnthropicModule = require('@anthropic-ai/sdk');
 const Anthropic = AnthropicModule.default || AnthropicModule;
 const OpenAIModule = require('openai');
 const OpenAI = OpenAIModule.default || OpenAIModule;
+const toFile = OpenAIModule.toFile || OpenAI.toFile;
 
 
 /* The app used to be called Slava. Electron derives the data folder from the
@@ -70,6 +71,9 @@ function migrate() {
 
   for (const a of store.agents) {
     if (!a.provider) a.provider = /^claude/.test(a.model || '') ? 'anthropic' : 'openai';
+    // Agents from before voice start speaking, each in a voice of its own —
+    // picked from the id so it is stable and so two chats rarely sound alike.
+    if (!a.voice) a.voice = { speak: true, name: voiceForId(a.id) };
     // Agents from before generated pictures keep the emoji face they had.
     if (!a.avatar) a.avatar = { kind: 'emoji' };
     // Existing history counts as already read — don't light up on upgrade.
@@ -99,8 +103,9 @@ function saveStore() {
 }
 
 function defaultAgent() {
+  const id = newId();
   return {
-    id: newId(),
+    id,
     name: 'Research Assistant',
     description:
       'A meticulous research assistant. Searches the web for current information, ' +
@@ -112,6 +117,7 @@ function defaultAgent() {
     provider: 'openai',
     model: '',
     tools: { web: true, browser: true, confirm: true, apps: true, tasks: true },
+    voice: { speak: true, name: voiceForId(id) },
     lastReadTs: Date.now(),
     createdAt: Date.now(),
     messages: [],
@@ -226,6 +232,143 @@ async function defaultModel(provider) {
 }
 
 // ---------------------------------------------------------------------------
+// Voice — talking to an agent, and hearing it answer
+//
+// Both halves run through OpenAI. Anthropic publishes no audio API, so even a
+// Claude agent needs an OpenAI key to be spoken to; without one the renderer is
+// told so in words rather than being handed an exception.
+// ---------------------------------------------------------------------------
+
+const VOICES = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse'];
+const DEFAULT_VOICE = 'coral';
+
+/** A stable voice per agent, so two chats rarely sound like the same person. */
+function voiceForId(id) {
+  let h = 0;
+  for (const ch of String(id || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return VOICES[h % VOICES.length];
+}
+
+/* The first entry of each list is the one we want. The fallback is there because
+   an account without access to the newer model would otherwise lose voice
+   altogether; a model that is rejected once is remembered, so the fallback costs
+   one failed call rather than one per utterance. */
+const TRANSCRIBE_MODELS = ['gpt-4o-transcribe', 'whisper-1'];
+const SPEECH_MODELS = ['gpt-4o-mini-tts', 'tts-1'];
+const refusedModels = new Set();
+
+/* Container before codec: the recorder reports "audio/webm;codecs=opus", and
+   matching on the codec there would name a WebM file .ogg and be rejected. */
+const EXT_BY_MIME = [
+  [/webm/, 'webm'],
+  [/ogg|opus/, 'ogg'],
+  [/mp4|m4a|aac/, 'm4a'],
+  [/mpeg|mp3/, 'mp3'],
+  [/wav/, 'wav'],
+  [/flac/, 'flac'],
+];
+
+async function withModelFallback(list, run) {
+  let lastErr = null;
+  for (const model of list) {
+    if (refusedModels.has(model)) continue;
+    try {
+      return await run(model);
+    } catch (err) {
+      const status = err?.status ?? err?.response?.status;
+      if (status === 404 || status === 400 || status === 403) {
+        refusedModels.add(model);
+        lastErr = err;
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr || new Error('No usable audio model for this account.');
+}
+
+function voiceError(err) {
+  const status = err?.status ?? err?.response?.status;
+  if (status === 401) return 'That OpenAI key was rejected.';
+  if (status === 429) return 'OpenAI is rate-limiting voice right now — try again in a moment.';
+  if (status === 404 || status === 403) return "This account has no access to OpenAI's audio models.";
+  return err?.message || 'Voice failed.';
+}
+
+/* Markdown read aloud sounds like punctuation soup, so strip it to the words a
+   person would actually say. Links keep their text and lose their URL; code
+   fences are dropped entirely rather than spelled out character by character. */
+function speakable(text) {
+  return String(text || '')
+    .replace(/```[\s\S]*?```/g, ' (code) ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    .replace(/^\s{0,3}>\s?/gm, '')
+    .replace(/^\s*[-*+]\s+/gm, '')
+    .replace(/(\*\*|__|\*|_|~~)/g, '')
+    .replace(/https?:\/\/\S+/g, ' link ')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{2,}/g, '\n')
+    .trim()
+    .slice(0, 3800); // the speech endpoint caps its input
+}
+
+ipcMain.handle('voice:info', () => ({
+  voices: VOICES,
+  defaultVoice: DEFAULT_VOICE,
+  ready: Boolean(getKey('openai')),
+}));
+
+ipcMain.handle('voice:transcribe', async (_e, { data, mime }) => {
+  const client = getClient('openai');
+  if (!client) return { error: 'Voice needs an OpenAI key — add one in Settings.' };
+
+  const buf = Buffer.from(data || []);
+  if (buf.length < 2000) return { text: '' }; // a tap on the button, not speech
+
+  try {
+    const text = await withModelFallback(TRANSCRIBE_MODELS, async (model) => {
+      // The endpoint reads the format from the filename, so it has to match
+      // whatever the recorder actually produced.
+      const ext = EXT_BY_MIME.find(([re]) => re.test(mime || ''))?.[1] || 'webm';
+      const file = await toFile(buf, `speech.${ext}`, { type: mime || 'audio/webm' });
+      const res = await client.audio.transcriptions.create({ file, model });
+      return String(res?.text || '').trim();
+    });
+    return { text };
+  } catch (err) {
+    console.error('transcribe failed:', err.message);
+    return { error: voiceError(err) };
+  }
+});
+
+ipcMain.handle('voice:speak', async (_e, { text, voice }) => {
+  const client = getClient('openai');
+  if (!client) return { error: 'Voice needs an OpenAI key — add one in Settings.' };
+
+  const input = speakable(text);
+  if (!input) return { audio: null };
+
+  try {
+    const audio = await withModelFallback(SPEECH_MODELS, async (model) => {
+      const res = await client.audio.speech.create({
+        model,
+        voice: VOICES.includes(voice) ? voice : DEFAULT_VOICE,
+        input,
+        response_format: 'mp3',
+      });
+      return Buffer.from(await res.arrayBuffer());
+    });
+    return { audio };
+  } catch (err) {
+    console.error('speech failed:', err.message);
+    return { error: voiceError(err) };
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Windows
 // ---------------------------------------------------------------------------
 
@@ -258,12 +401,42 @@ function createWindow() {
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   win.once('ready-to-show', () => win.show());
 
+  installPermissionHandlers();
+
   win.on('closed', () => (win = null));
 
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
   });
+}
+
+/* Permissions.
+   The chat window is the only thing in the app allowed to reach the microphone.
+   Mini-apps are model-written HTML and the browser panel drives real websites,
+   so neither may ask for it — without this a page the agent visited could put a
+   microphone prompt in front of you and look like the app was asking. */
+const SENSITIVE_PERMISSIONS = new Set([
+  'media', 'audioCapture', 'videoCapture', 'geolocation', 'notifications',
+  'midi', 'midiSysex', 'hid', 'serial', 'usb', 'clipboard-read',
+  'display-capture', 'idle-detection', 'speaker-selection',
+]);
+
+const isChatWindow = (wc) => Boolean(win) && !win.isDestroyed() && wc === win.webContents;
+
+function installPermissionHandlers() {
+  const chatSide = (wc, permission) => {
+    if (permission === 'media' || permission === 'audioCapture') return isChatWindow(wc);
+    if (SENSITIVE_PERMISSIONS.has(permission)) return false;
+    return true;
+  };
+
+  session.defaultSession.setPermissionRequestHandler((wc, permission, done) => done(chatSide(wc, permission)));
+  session.defaultSession.setPermissionCheckHandler((wc, permission) => chatSide(wc, permission));
+
+  const browser = session.fromPartition(BROWSER_PARTITION);
+  browser.setPermissionRequestHandler((_wc, permission, done) => done(!SENSITIVE_PERMISSIONS.has(permission)));
+  browser.setPermissionCheckHandler((_wc, permission) => !SENSITIVE_PERMISSIONS.has(permission));
 }
 
 app.on('web-contents-created', (_e, contents) => {
