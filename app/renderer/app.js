@@ -557,26 +557,38 @@ $('stop').onclick = () => {
   window.internall.stop(activeId);
 };
 
-async function sendMessage() {
-  const agent = agentById(activeId);
+function sendMessage() {
   const text = input.value.trim();
-  if (!agent || !text || streaming.has(agent.id)) return;
+  if (!text) return;
 
   input.value = '';
   input.style.height = 'auto';
   clearTimeout(draftTimer);
-  agent.draft = '';
-  window.internall.saveDraft(agent.id, '');
+  const agent = agentById(activeId);
+  if (agent) {
+    agent.draft = '';
+    window.internall.saveDraft(agent.id, '');
+  }
+  return sendText(activeId, text);
+}
+
+/* Shared by the composer and by hands-free listening, which has a message to
+   send without any of it ever having been in the textarea. */
+async function sendText(agentId, text) {
+  const agent = agentById(agentId);
+  if (!agent || !text || streaming.has(agent.id)) return;
 
   stopSpeaking(); // asking something new cuts off the previous answer
 
   const msg = await window.internall.send(agent.id, text);
   if (!msg) return;
   agent.messages.push(msg);
-  if (agent.messages.length === 1) renderChat();
-  else {
-    renderMessage($('messages'), msg);
-    scrollDown();
+  if (agent.id === activeId) {
+    if (agent.messages.length === 1) renderChat();
+    else {
+      renderMessage($('messages'), msg);
+      scrollDown();
+    }
   }
   renderList();
 }
@@ -1685,6 +1697,10 @@ window.internall.voiceInfo().then((info) => {
   voiceInfo = info;
   fillVoices($('f-voice'), voiceInfo.defaultVoice);
   syncMuteBtn();
+  syncHandsBtn();
+  // Listening is sticky: if you left it on, it comes back on, because having to
+  // switch it on every launch is the quickest way to stop using it.
+  if (localStorage.getItem('hands-free') === '1' && voiceInfo.ready) handsOn();
 });
 
 const voiceOf = (agent) => agent?.voice?.name || voiceInfo.defaultVoice;
@@ -1968,3 +1984,369 @@ $('f-voice-try').onclick = async () => {
   speech.voice = name;
   enqueueSpeech(`Hello — I'm ${$('f-name').value.trim() || 'your new agent'}, and this is how I sound.`);
 };
+
+/* ──────────────────────  Hands-free listening  ──────────────────────
+
+   Call an agent by name and keep talking. Nothing is sent anywhere until the
+   app is reasonably sure you said something: the microphone is watched locally
+   through an analyser node, and only a stretch of audio that looks like speech
+   — loud enough, long enough, and followed by a pause — is transcribed. Silence
+   and room noise never leave the machine, which keeps both the bill and the
+   privacy story honest.
+
+   While idle it is listening for "hello <agent>". Once an agent answers to its
+   name the conversation stays with it, so you can keep talking without saying
+   the name again, until you go quiet for a while.                          */
+
+/* Thresholds are deliberately conservative. A false trigger is not just a
+   stray message — it is a transcription you paid for, so the test is relative
+   to the room AND above an absolute level that ordinary room noise does not
+   reach. Measured against a quiet room reading about 0.007 RMS; speech at
+   normal distance sits well above 0.02. */
+const VAD = {
+  TICK_MS: 50,
+  ARM_OVER_FLOOR: 2.2,
+  SPEECH_OVER_FLOOR: 3.4,
+  MIN_ARM: 0.018,          // below this, nothing starts recording
+  MIN_SPEECH: 0.024,       // below this, it is not a voice
+  ABS_FLOOR: 0.004,
+  CONFIRM_MS: 250,         // speech must hold this long to be real
+  ARM_GIVEUP_MS: 700,      // armed but never confirmed — a door, a cough
+  END_SILENCE_MS: 900,     // this much quiet ends your turn
+  MIN_UTTERANCE_MS: 500,
+  MIN_VOICED_MS: 400,      // loud frames needed before it is worth transcribing
+  MAX_UTTERANCE_MS: 20000,
+  CONVERSATION_MS: 45000,  // how long an agent stays in conversation with you
+};
+
+const hands = {
+  on: false,
+  stream: null, ctx: null, analyser: null, buf: null, timer: null,
+  rec: null, chunks: [], recMime: '',
+  state: 'idle',           // idle | armed | speech
+  floor: VAD.ABS_FLOOR,
+  heldMs: 0, silentMs: 0, armedMs: 0, loudMs: 0, startedAt: 0,
+  busy: false,
+  lockId: null,            // the agent you are currently talking to
+  lockUntil: 0,
+};
+
+const inConversation = () => hands.lockId && Date.now() < hands.lockUntil;
+
+async function handsOn() {
+  if (hands.on) return;
+  if (!voiceInfo.ready) return voiceTrouble('Voice needs an OpenAI key — add one in Settings.');
+
+  try {
+    hands.stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+  } catch {
+    return voiceTrouble('No microphone access. Allow it in System Settings → Privacy & Security → Microphone.');
+  }
+
+  hands.ctx = new AudioContext();
+  hands.analyser = hands.ctx.createAnalyser();
+  hands.analyser.fftSize = 1024;
+  hands.buf = new Float32Array(hands.analyser.fftSize);
+  hands.ctx.createMediaStreamSource(hands.stream).connect(hands.analyser);
+
+  hands.on = true;
+  hands.state = 'idle';
+  hands.floor = VAD.ABS_FLOOR;
+  hands.timer = setInterval(handsTick, VAD.TICK_MS);
+  localStorage.setItem('hands-free', '1');
+  syncHandsBtn();
+}
+
+function handsOff() {
+  clearInterval(hands.timer);
+  handsDiscard();
+  hands.stream?.getTracks().forEach((t) => t.stop());
+  hands.ctx?.close().catch(() => {});
+  Object.assign(hands, {
+    on: false, stream: null, ctx: null, analyser: null, buf: null, timer: null,
+    state: 'idle', lockId: null, lockUntil: 0,
+  });
+  localStorage.setItem('hands-free', '0');
+  syncHandsBtn();
+  if (recState === 'idle') input.placeholder = 'Message';
+}
+
+/** Loudness right now, as RMS over the latest window. */
+function micLevel() {
+  hands.analyser.getFloatTimeDomainData(hands.buf);
+  let sum = 0;
+  for (let i = 0; i < hands.buf.length; i++) sum += hands.buf[i] * hands.buf[i];
+  return Math.sqrt(sum / hands.buf.length);
+}
+
+function handsTick() {
+  if (!hands.on || !hands.analyser) return;
+
+  // Don't listen to the agent talking, to your own push-to-talk recording, or
+  // to anything while the last utterance is still being dealt with.
+  const agentTalking = Boolean(speech.audio) || speech.slots.length > 0 || speech.draining;
+  if (agentTalking || hands.busy || recState !== 'idle') {
+    if (hands.state !== 'idle') handsDiscard();
+    return;
+  }
+
+  const level = micLevel();
+  const armAt = Math.max(hands.floor * VAD.ARM_OVER_FLOOR, VAD.MIN_ARM);
+  const speechAt = Math.max(hands.floor * VAD.SPEECH_OVER_FLOOR, VAD.MIN_SPEECH);
+
+  if (hands.state === 'idle') {
+    // Track the noise floor only while nothing is happening, so a long sentence
+    // cannot drag the threshold up behind itself.
+    hands.floor = Math.max(VAD.ABS_FLOOR, hands.floor * 0.95 + level * 0.05);
+    if (level > armAt) handsArm();
+    return;
+  }
+
+  if (hands.state === 'armed') {
+    hands.armedMs += VAD.TICK_MS;
+    if (level > speechAt) hands.heldMs += VAD.TICK_MS;
+    else hands.heldMs = 0;
+
+    if (hands.heldMs >= VAD.CONFIRM_MS) {
+      hands.state = 'speech';
+      hands.silentMs = 0;
+      hands.loudMs = hands.heldMs;
+      setHandsNote();
+    } else if (hands.armedMs >= VAD.ARM_GIVEUP_MS) {
+      handsDiscard(); // never became speech — nothing is sent, nothing is paid for
+    }
+    return;
+  }
+
+  // state === 'speech'
+  if (level > speechAt) {
+    hands.silentMs = 0;
+    hands.loudMs += VAD.TICK_MS;
+  } else hands.silentMs += VAD.TICK_MS;
+
+  const spoken = Date.now() - hands.startedAt;
+  if (hands.silentMs >= VAD.END_SILENCE_MS || spoken >= VAD.MAX_UTTERANCE_MS) {
+    // Long but mostly quiet means a noisy room, not a sentence.
+    if (spoken < VAD.MIN_UTTERANCE_MS || hands.loudMs < VAD.MIN_VOICED_MS) handsDiscard();
+    else handsFinish();
+  }
+}
+
+function handsArm() {
+  try {
+    hands.rec = new MediaRecorder(hands.stream, pickRecorderMime());
+  } catch {
+    return handsOff();
+  }
+  hands.chunks = [];
+  hands.recMime = hands.rec.mimeType || 'audio/webm';
+  hands.rec.ondataavailable = (e) => e.data.size && hands.chunks.push(e.data);
+  hands.rec.start();
+  hands.state = 'armed';
+  hands.armedMs = 0;
+  hands.heldMs = 0;
+  hands.startedAt = Date.now();
+}
+
+/** Throw the current capture away without transcribing it. */
+function handsDiscard() {
+  try {
+    if (hands.rec && hands.rec.state !== 'inactive') {
+      hands.rec.ondataavailable = null;
+      hands.rec.onstop = null;
+      hands.rec.stop();
+    }
+  } catch {}
+  hands.rec = null;
+  hands.chunks = [];
+  hands.state = 'idle';
+  hands.heldMs = hands.silentMs = hands.armedMs = hands.loudMs = 0;
+  setHandsNote();
+}
+
+function handsFinish() {
+  const rec = hands.rec;
+  if (!rec) return handsDiscard();
+  hands.state = 'idle';
+  hands.busy = true;
+  setHandsNote('Transcribing…');
+
+  rec.onstop = async () => {
+    const blob = new Blob(hands.chunks, { type: hands.recMime });
+    hands.chunks = [];
+    hands.rec = null;
+    try {
+      await handsHeard(blob);
+    } finally {
+      hands.busy = false;
+      setHandsNote();
+    }
+  };
+  try {
+    rec.stop();
+  } catch {
+    hands.busy = false;
+    handsDiscard();
+  }
+}
+
+async function handsHeard(blob) {
+  if (!blob.size) return;
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const res = await window.internall.transcribe(bytes, hands.recMime);
+  if (res?.error) return voiceTrouble(res.error);
+
+  const text = (res?.text || '').trim();
+  if (!text) return;
+
+  // Already talking to someone — anything you say goes to them.
+  if (inConversation()) {
+    if (isFarewell(text)) {
+      hands.lockId = null;
+      return setHandsNote();
+    }
+    hands.lockUntil = Date.now() + VAD.CONVERSATION_MS;
+    return handsSay(hands.lockId, text);
+  }
+
+  const hit = matchWake(text, agents);
+  if (!hit) return; // not addressed to anyone here; stay quiet and keep listening
+
+  hands.lockId = hit.agent.id;
+  hands.lockUntil = Date.now() + VAD.CONVERSATION_MS;
+  if (hit.agent.id !== activeId) selectAgent(hit.agent.id);
+  setHandsNote();
+
+  // "hello kallax, what's on my list" — the greeting opens the chat and the
+  // rest of the sentence is the first thing you said to it.
+  if (hit.rest) await handsSay(hit.agent.id, hit.rest);
+}
+
+async function handsSay(agentId, text) {
+  const agent = agentById(agentId);
+  if (!agent) return;
+  if (streaming.has(agentId)) return setHandsNote('Still answering — wait for it to finish');
+  await sendText(agentId, text);
+}
+
+const isFarewell = (t) =>
+  /^\s*(that'?s all|thanks,? that'?s all|goodbye|bye|stop listening|never ?mind|nothing)\b/i.test(t);
+
+/* ── Hearing your own agent's name ──
+   Transcription mangles invented names — "gyubee" comes back as "goo bee" and
+   "kallax" as "colax" — so names are compared on how close they sound rather
+   than letter for letter. */
+
+const normalise = (s) =>
+  String(s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+
+function editDistance(a, b) {
+  const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let diag = prev[0];
+    prev[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const tmp = prev[j];
+      prev[j] = Math.min(prev[j] + 1, prev[j - 1] + 1, diag + (a[i - 1] === b[j - 1] ? 0 : 1));
+      diag = tmp;
+    }
+  }
+  return prev[b.length];
+}
+
+const similarity = (a, b) => {
+  if (!a || !b) return 0;
+  const longest = Math.max(a.length, b.length);
+  return 1 - editDistance(a, b) / longest;
+};
+
+/* A rough phonetic key, in the spirit of Soundex: vowels dropped and
+   consonants folded into the groups that sound alike, so "colax" and "kallax"
+   — or "goo bee" and "gyubee" — collapse onto the same string. It is what
+   rescues invented names, which transcription almost never spells the way you
+   first wrote them. */
+const SOUND_GROUPS = { b: 1, f: 1, p: 1, v: 1, c: 2, g: 2, j: 2, k: 2, q: 2, s: 2, x: 2, z: 2, d: 3, t: 3, l: 4, m: 5, n: 5, r: 6 };
+
+function soundKey(s) {
+  let out = '';
+  for (const ch of normalise(s).replace(/[^a-z]/g, '')) {
+    const code = SOUND_GROUPS[ch];
+    if (code && String(code) !== out[out.length - 1]) out += code;
+  }
+  return out;
+}
+
+const WAKE_WORDS = /^(hey|hi|hello|ok|okay|yo|hola)\b[\s,.!]*/i;
+const NAME_MATCH = 0.68;  // below this it is somebody else's conversation
+const SOUNDS_LIKE = 0.42;  // how close the spelling must still be to trust the sound
+
+/** How strongly a heard phrase stands for an agent's name. */
+function nameScore(heard, name) {
+  const spelled = similarity(heard, name);
+  if (spelled >= NAME_MATCH) return spelled;
+
+  // Spelled differently but sounds the same — and not so different that any
+  // short word would land on it.
+  const key = soundKey(heard);
+  if (key.length >= 2 && key === soundKey(name) && spelled >= SOUNDS_LIKE) return 0.7;
+  return spelled;
+}
+
+/** "hello market specialist, what's up" → { agent, rest: "what's up" } */
+function matchWake(text, list) {
+  const stripped = normalise(text).replace(WAKE_WORDS, '');
+  if (stripped === normalise(text)) return null; // no greeting, so not a summons
+
+  const words = stripped.split(' ').filter(Boolean);
+  if (!words.length) return null;
+
+  // Score every leading phrase against every name and keep the best. Taking the
+  // longest match instead would let "market specialist what is" beat "market
+  // specialist" on a loose threshold and swallow the first word of the message.
+  let best = null;
+  for (let n = 1; n <= Math.min(4, words.length); n++) {
+    const phrase = words.slice(0, n).join(' ');
+    for (const agent of list) {
+      const score = nameScore(phrase, normalise(agent.name));
+      if (score >= NAME_MATCH && (!best || score > best.score + 0.001)) {
+        best = { agent, score, rest: words.slice(n).join(' ') };
+      }
+    }
+  }
+  return best;
+}
+
+/* ── Status line and the toggle ── */
+
+function setHandsNote(override) {
+  if (recState !== 'idle') return; // push-to-talk owns the placeholder
+  if (!hands.on) return;
+  if (override) return (input.placeholder = override);
+
+  if (hands.state === 'speech') input.placeholder = 'Listening…';
+  else if (inConversation()) {
+    const agent = agentById(hands.lockId);
+    input.placeholder = `Talking with ${agent?.name || 'your agent'} — just keep going`;
+  } else input.placeholder = 'Say “hello” and an agent’s name…';
+}
+
+function syncHandsBtn() {
+  const btn = $('hands');
+  if (!btn) return;
+  btn.classList.toggle('on', hands.on);
+  btn.title = hands.on ? 'Stop listening for your voice' : 'Listen for “hello <agent>”';
+  setHandsNote();
+  if (!hands.on && recState === 'idle') input.placeholder = 'Message';
+}
+
+$('hands').onclick = () => (hands.on ? handsOff() : handsOn());
+
+// The conversation lapses on its own, so the placeholder has to notice.
+setInterval(() => {
+  if (hands.on && hands.lockId && !inConversation()) {
+    hands.lockId = null;
+    setHandsNote();
+  }
+}, 2000);

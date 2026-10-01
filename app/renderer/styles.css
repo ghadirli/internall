@@ -135,6 +135,7 @@ input, textarea, select { font: inherit; color: inherit; }
 #search::-webkit-search-cancel-button { -webkit-appearance: none; }
 
 .icon-btn {
+  position: relative;
   width: 30px; height: 30px;
   display: grid; place-items: center;
   border-radius: 8px;
@@ -516,6 +517,21 @@ details.activity .steps .chip { margin: 5px 0; box-shadow: none; }
 /* The header speaker only appears for an agent that talks, and leans on the
    accent colour while sound is actually coming out. */
 .icon-btn.speaking { color: var(--accent); }
+
+/* Listening is a mode you are in, not an action, so the button stays lit for
+   as long as the microphone is open — no ambiguity about whether it is on. */
+.icon-btn.on { color: var(--accent); }
+.icon-btn.on .hands-dot { display: block; }
+.hands-dot {
+  position: absolute; top: 3px; right: 3px;
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent);
+  animation: hands-breathe 2s ease-in-out infinite;
+}
+@keyframes hands-breathe {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: .35; transform: scale(.8); }
+}
 
 .voice-row { display: flex; gap: 8px; align-items: center; margin: 10px 0 2px; }
 .voice-row select {

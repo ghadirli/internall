@@ -200,6 +200,27 @@ sound alike and changeable in the agent editor, where **Hear it** plays a sample
   grants it to the main window only and denies it to the browser panel and to mini-apps, so a
   site the agent visits cannot put a microphone prompt in front of you wearing the app's face.
 
+**Hands-free** — the ear icon in the chat header. With it on, say *"hello Kallax, add milk to the
+list"* and that chat opens and gets the message. The agent then stays in conversation with you for
+45 seconds after each exchange, so you can keep talking without repeating its name; *"that's all"*
+or *"goodbye"* ends it early, and the composer line tells you who you are talking to.
+
+- **Your turn ends when you stop talking.** A pause of 0.9s closes it — short enough to feel
+  responsive, long enough to think mid-sentence without being cut off. Utterances cap at 20s.
+- **Nothing leaves the machine until it sounds like speech.** The microphone is watched locally
+  through an analyser node; audio is only transcribed if it is loud enough (both relative to the
+  room and above an absolute level), holds for 250ms, and carries at least 400ms of voiced time.
+  A quiet room, a hum or a door closing never produces an API call — which matters, because a
+  false trigger is a transcription you pay for.
+- **Names are matched on how they sound**, not how they are spelled: transcription renders
+  *gyubee* as "goo bee" and *kallax* as "colax", so a Soundex-style key is compared alongside the
+  edit distance. A greeting word is required, so *"hi mum, I'll call you back"* is ignored.
+- **It does not listen to the agent talking.** Detection pauses while a reply is being spoken and
+  resumes when it finishes, which also means you cannot currently interrupt by voice — hold the
+  mic button or press Stop for that.
+- **The microphone stays open while the mode is on**, and the header icon is lit the whole time.
+  It is off by default and remembers your choice between launches.
+
 **Browser panel** — ⌘B, or the globe icon in the chat header. Back / forward / reload, an
 address bar (a non-URL is searched on DuckDuckGo), "open in Safari", and a draggable divider to
 resize it. It keeps its own persistent session, so sites you log into stay logged in — which is

@@ -7,7 +7,8 @@ its own provider and model (OpenAI or Anthropic, chosen per agent), its own voic
 of abilities: searching the web, driving the app's built-in browser while you watch, building small
 interactive apps, and scheduling work to run later without being asked again.
 
-You can type to an agent or talk to it — hold the mic button, or hold ⌥, and it answers out loud.
+You can type to an agent, hold a button and talk to it, or turn on hands-free and just say
+*"hello Kallax"* — that chat opens, hears the rest of your sentence, and answers out loud.
 Voice is on the desktop app for now; the phone version is still text only.
 
 There is no server in the middle. Requests go from your machine straight to the provider, and your
@@ -36,6 +37,11 @@ chip, and anything consequential — here, clicking “Submit application” —
   `window.internall.send("…")` posts a message into the conversation, so an “Ask about this one”
   button continues the chat. The HTML is stored on disk and deliberately kept out of the
   transcript, so it is never re-sent to the model.
+- **Hands-free, without streaming your room to anyone.** Call an agent by name and it opens that
+  chat and takes the rest of the sentence as your message. Turn-taking is decided locally: an
+  analyser node watches the microphone and only a stretch that is loud enough, holds for 250ms and
+  carries 400ms of voiced time is ever transcribed, so a quiet room costs nothing. Names are
+  matched phonetically, because transcription renders *gyubee* as "goo bee".
 - **Voice that starts before the sentence ends.** Hold to talk; the recording is transcribed and
   sent on release. The reply is spoken back in a voice derived from the agent's id, and speech is
   requested a sentence at a time *while the answer is still streaming* — chunks fetched in
