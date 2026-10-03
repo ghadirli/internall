@@ -1998,20 +1998,29 @@ $('f-voice-try').onclick = async () => {
    name the conversation stays with it, so you can keep talking without saying
    the name again, until you go quiet for a while.                          */
 
-/* Thresholds are deliberately conservative. A false trigger is not just a
-   stray message — it is a transcription you paid for, so the test is relative
-   to the room AND above an absolute level that ordinary room noise does not
-   reach. Measured against a quiet room reading about 0.007 RMS; speech at
-   normal distance sits well above 0.02. */
+/* Thresholds are measured against the room, not against a number.
+
+   Microphones differ by more than an order of magnitude: the same room read
+   0.0044 RMS through one input and 0.0001 through another, so any absolute
+   level is either deaf on a quiet device or trigger-happy on a loud one. What
+   is constant is the ratio — speech runs many times the noise floor — so the
+   gates float on a continuously estimated floor, and the absolute minimums
+   exist only to stop division into nonsense near silence.
+
+   What keeps a steady hum from qualifying is not the level but the shape: it
+   has to rise, hold for CONFIRM_MS, and carry MIN_VOICED_MS of loud frames
+   before a single byte is sent anywhere. */
 const VAD = {
   TICK_MS: 50,
-  ARM_OVER_FLOOR: 2.2,
-  SPEECH_OVER_FLOOR: 3.4,
-  MIN_ARM: 0.018,          // below this, nothing starts recording
-  MIN_SPEECH: 0.024,       // below this, it is not a voice
-  ABS_FLOOR: 0.004,
+  ARM_OVER_FLOOR: 2.5,
+  SPEECH_OVER_FLOOR: 4.5,
+  MIN_ARM: 0.0003,         // a Bluetooth headset peaks around 0.003 — stay under it
+  MIN_SPEECH: 0.0006,
+  FLOOR_MIN: 0.00002,
+  DEAF_LEVEL: 0.0008,      // below this for DEAF_AFTER_MS, something is wrong
+  DEAF_AFTER_MS: 20000,
   CONFIRM_MS: 250,         // speech must hold this long to be real
-  ARM_GIVEUP_MS: 700,      // armed but never confirmed — a door, a cough
+  ARM_GIVEUP_MS: 1000,     // armed but never confirmed — a door, a cough
   END_SILENCE_MS: 900,     // this much quiet ends your turn
   MIN_UTTERANCE_MS: 500,
   MIN_VOICED_MS: 400,      // loud frames needed before it is worth transcribing
@@ -2024,7 +2033,12 @@ const hands = {
   stream: null, ctx: null, analyser: null, buf: null, timer: null,
   rec: null, chunks: [], recMime: '',
   state: 'idle',           // idle | armed | speech
-  floor: VAD.ABS_FLOOR,
+  floor: VAD.MIN_SPEECH,
+  level: 0,
+  hist: [],
+  device: '',
+  peak: 0,
+  quietMs: 0,
   heldMs: 0, silentMs: 0, armedMs: 0, loudMs: 0, startedAt: 0,
   busy: false,
   lockId: null,            // the agent you are currently talking to
@@ -2046,14 +2060,21 @@ async function handsOn() {
   }
 
   hands.ctx = new AudioContext();
+  // Restored at launch there has been no click yet, and an AudioContext created
+  // without a gesture can come up suspended — which reads as perfect silence.
+  if (hands.ctx.state === 'suspended') await hands.ctx.resume().catch(() => {});
   hands.analyser = hands.ctx.createAnalyser();
   hands.analyser.fftSize = 1024;
   hands.buf = new Float32Array(hands.analyser.fftSize);
   hands.ctx.createMediaStreamSource(hands.stream).connect(hands.analyser);
 
+  hands.device = hands.stream.getAudioTracks()[0]?.label || 'the microphone';
+  hands.peak = 0;
+  hands.quietMs = 0;
   hands.on = true;
   hands.state = 'idle';
-  hands.floor = VAD.ABS_FLOOR;
+  hands.floor = VAD.MIN_SPEECH;
+  hands.hist = [];
   hands.timer = setInterval(handsTick, VAD.TICK_MS);
   localStorage.setItem('hands-free', '1');
   syncHandsBtn();
@@ -2069,8 +2090,49 @@ function handsOff() {
     state: 'idle', lockId: null, lockUntil: 0,
   });
   localStorage.setItem('hands-free', '0');
+  mic.classList.remove('hearing');
   syncHandsBtn();
   if (recState === 'idle') input.placeholder = 'Message';
+}
+
+/* An input that never rises at all is the likeliest reason for "it does not
+   work": the default device is a headset in a case, or a virtual device from
+   some other app, while you talk at the laptop. Silence is indistinguishable
+   from not listening, so say which device is being heard from. */
+function watchForDeafness(level) {
+  if (level > hands.peak) hands.peak = level;
+  hands.quietMs += VAD.TICK_MS;
+  if (hands.quietMs < VAD.DEAF_AFTER_MS) return;
+
+  if (hands.peak < VAD.DEAF_LEVEL) {
+    voiceTrouble(`Hearing nothing from ${hands.device} — check Sound input in System Settings`);
+  }
+  hands.quietMs = 0;
+  hands.peak = 0;
+}
+
+/* Noise floor as the quietest moment of the last few seconds, eased rather than
+   jumped to.
+
+   Speech always has dips — between words, between syllables — so the window
+   minimum stays near the true floor while someone is talking. A fan or a hum
+   has no dips, so within one window it *becomes* the floor and stops reading as
+   speech. An exponential climb was tried first and is far too slow: a hum a
+   hundred times the floor would have taken twenty seconds to absorb, and been
+   transcribed on the way.
+
+   Frozen during confirmed speech, so a long sentence cannot raise the bar that
+   decides when that same sentence ended. */
+const FLOOR_WINDOW = 80; // 4 seconds at TICK_MS
+
+function trackFloor(level) {
+  const hist = hands.hist;
+  hist.push(level);
+  if (hist.length > FLOOR_WINDOW) hist.shift();
+
+  let min = Infinity;
+  for (const v of hist) if (v < min) min = v;
+  hands.floor = Math.max(VAD.FLOOR_MIN, hands.floor * 0.8 + min * 0.2);
 }
 
 /** Loudness right now, as RMS over the latest window. */
@@ -2093,24 +2155,27 @@ function handsTick() {
   }
 
   const level = micLevel();
+  watchForDeafness(level);
+  if (hands.state !== 'speech') trackFloor(level);
   const armAt = Math.max(hands.floor * VAD.ARM_OVER_FLOOR, VAD.MIN_ARM);
   const speechAt = Math.max(hands.floor * VAD.SPEECH_OVER_FLOOR, VAD.MIN_SPEECH);
+  hands.level = level;
 
   if (hands.state === 'idle') {
-    // Track the noise floor only while nothing is happening, so a long sentence
-    // cannot drag the threshold up behind itself.
-    hands.floor = Math.max(VAD.ABS_FLOOR, hands.floor * 0.95 + level * 0.05);
     if (level > armAt) handsArm();
     return;
   }
 
   if (hands.state === 'armed') {
     hands.armedMs += VAD.TICK_MS;
+    // Loud time accumulates rather than having to be unbroken: speech dips
+    // between words and on stop consonants, and demanding an unbroken quarter
+    // second meant a normal sentence never confirmed at all.
     if (level > speechAt) hands.heldMs += VAD.TICK_MS;
-    else hands.heldMs = 0;
 
     if (hands.heldMs >= VAD.CONFIRM_MS) {
       hands.state = 'speech';
+      mic.classList.add('hearing');
       hands.silentMs = 0;
       hands.loudMs = hands.heldMs;
       setHandsNote();
@@ -2163,6 +2228,7 @@ function handsDiscard() {
   hands.chunks = [];
   hands.state = 'idle';
   hands.heldMs = hands.silentMs = hands.armedMs = hands.loudMs = 0;
+  mic.classList.remove('hearing');
   setHandsNote();
 }
 
@@ -2171,7 +2237,17 @@ function handsFinish() {
   if (!rec) return handsDiscard();
   hands.state = 'idle';
   hands.busy = true;
+  mic.classList.remove('hearing');
   setHandsNote('Transcribing…');
+
+  // If onstop never arrives, or handsHeard hangs, busy would stay set and
+  // nothing would ever be heard again. Release it either way.
+  const release = () => {
+    if (!hands.busy) return;
+    hands.busy = false;
+    setHandsNote();
+  };
+  const watchdog = setTimeout(release, 30000);
 
   rec.onstop = async () => {
     const blob = new Blob(hands.chunks, { type: hands.recMime });
@@ -2180,8 +2256,8 @@ function handsFinish() {
     try {
       await handsHeard(blob);
     } finally {
-      hands.busy = false;
-      setHandsNote();
+      clearTimeout(watchdog);
+      release();
     }
   };
   try {

@@ -213,10 +213,18 @@ goodbye.
 - **Your turn ends when you stop talking.** A pause of 0.9s closes it — short enough to feel
   responsive, long enough to think mid-sentence without being cut off. Utterances cap at 20s.
 - **Nothing leaves the machine until it sounds like speech.** The microphone is watched locally
-  through an analyser node; audio is only transcribed if it is loud enough (both relative to the
-  room and above an absolute level), holds for 250ms, and carries at least 400ms of voiced time.
-  A quiet room, a hum or a door closing never produces an API call — which matters, because a
-  false trigger is a transcription you pay for.
+  through an analyser node; audio is only transcribed once it rises well above the room, holds for
+  250ms of voiced time, and carries 400ms of it in total. A quiet room, a hum or a door closing
+  never produces an API call — which matters, because a false trigger is a transcription you pay
+  for.
+- **Thresholds follow the device, not a fixed number.** The same room reads 0.0044 RMS through the
+  built-in microphone and 0.0001 through Bluetooth earbuds, so any absolute level is deaf on one
+  and trigger-happy on the other. The gates float on a noise floor taken as the quietest moment of
+  the last four seconds — speech always dips between words, a fan never does, so a steady hum is
+  absorbed into the floor within one window and stops counting.
+- **If it is hearing nothing it says so**, naming the input device. The usual cause is the default
+  input being a headset in its case, or a virtual device left behind by another app, while you talk
+  at the laptop. The microphone button goes solid while a voice is actually being heard.
 - **Names are matched on how they sound**, not how they are spelled: transcription renders
   *gyubee* as "goo bee" and *kallax* as "colax", so a Soundex-style key is compared alongside the
   edit distance. A greeting word is required, so *"hi mum, I'll call you back"* is ignored.

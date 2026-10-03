@@ -502,6 +502,9 @@ details.activity .steps .chip { margin: 5px 0; box-shadow: none; }
   background: var(--danger); color: #fff;
   animation: mic-pulse 1.5s ease-in-out infinite;
 }
+/* Lit while hands-free is actually hearing a voice — without it, "nothing
+   happened" gives you no way to tell listening from deafness. */
+.mic-btn.hearing { background: var(--accent-fill); color: #fff; }
 .mic-btn.thinking { color: var(--accent); }
 .mic-btn.thinking svg { animation: mic-fade .9s ease-in-out infinite; }
 
