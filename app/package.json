@@ -53,20 +53,30 @@
       }
     },
     "dmg": {
-      "title": "Slava",
+      "title": "Internall",
       "contents": [
         {
-          "x": 140,
-          "y": 200,
+          "x": 150,
+          "y": 180,
           "type": "file"
         },
         {
-          "x": 400,
-          "y": 200,
+          "x": 410,
+          "y": 180,
           "type": "link",
           "path": "/Applications"
+        },
+        {
+          "x": 280,
+          "y": 320,
+          "type": "file",
+          "path": "build/How to open Internall.txt"
         }
-      ]
+      ],
+      "window": {
+        "width": 560,
+        "height": 400
+      }
     }
   }
 }

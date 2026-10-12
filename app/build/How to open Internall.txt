@@ -1,0 +1,28 @@
+Internall
+=========
+
+1. Drag Internall onto the Applications folder in this window.
+
+2. The FIRST time you open it, do NOT double-click.
+   Go to your Applications folder, RIGHT-CLICK Internall, and choose "Open".
+   A warning will appear — click "Open" in it.
+
+   After that first time, it opens normally from the Dock or Spotlight.
+
+Why the warning?
+   The app is signed, but not notarised by Apple — that needs a paid Apple
+   Developer account. macOS shows this warning for any app that isn't.
+   Right-clicking and choosing "Open" is how you tell macOS you trust it.
+   If you'd rather not, don't install it.
+
+Setting it up
+   On first launch it asks for an API key. You need your own, from either
+   https://platform.openai.com/api-keys  (OpenAI)
+   or
+   https://console.anthropic.com/settings/keys  (Anthropic)
+
+   Your key is encrypted into the macOS Keychain and is sent only to the
+   provider you chose. There is no server in between, and no account to make.
+   Voice features need an OpenAI key specifically.
+
+   The app ships with no keys and no chat data in it.
