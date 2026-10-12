@@ -1,6 +1,6 @@
 {
   "name": "internall",
-  "productName": "Internall",
+  "productName": "InternAll",
   "version": "0.1.0",
   "description": "A messaging app for your own AI agents \u2014 web access, a browser they drive in front of you, mini-apps and scheduled tasks.",
   "main": "main.js",
@@ -21,7 +21,7 @@
   },
   "build": {
     "appId": "com.internall.app",
-    "productName": "Internall",
+    "productName": "InternAll",
     "directories": {
       "output": "dist",
       "buildResources": "build"
@@ -53,7 +53,7 @@
       }
     },
     "dmg": {
-      "title": "Internall",
+      "title": "InternAll",
       "contents": [
         {
           "x": 150,
@@ -70,7 +70,7 @@
           "x": 280,
           "y": 320,
           "type": "file",
-          "path": "build/How to open Internall.txt"
+          "path": "build/How to open InternAll.txt"
         }
       ],
       "window": {

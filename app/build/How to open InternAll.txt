@@ -1,10 +1,10 @@
-Internall
+InternAll
 =========
 
-1. Drag Internall onto the Applications folder in this window.
+1. Drag InternAll onto the Applications folder in this window.
 
 2. The FIRST time you open it, do NOT double-click.
-   Go to your Applications folder, RIGHT-CLICK Internall, and choose "Open".
+   Go to your Applications folder, RIGHT-CLICK InternAll, and choose "Open".
    A warning will appear — click "Open" in it.
 
    After that first time, it opens normally from the Dock or Spotlight.

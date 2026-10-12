@@ -283,7 +283,7 @@ function renderChat() {
   activeGroup = null; // the DOM it pointed at is gone
 
   if (!agent) {
-    $('ch-name').textContent = 'Internall';
+    $('ch-name').textContent = 'InternAll';
     $('ch-sub').textContent = 'no agent selected';
     box.innerHTML = `<div class="empty"><div class="big">💬</div><h3>No agents yet</h3>
       <p>Create your first agent — give it a name and describe what it should do. That description becomes its personality and job.</p></div>`;

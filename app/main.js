@@ -11,25 +11,32 @@ const OpenAI = OpenAIModule.default || OpenAIModule;
 const toFile = OpenAIModule.toFile || OpenAI.toFile;
 
 
-/* The app used to be called Slava. Electron derives the data folder from the
-   product name, so without this the rename would look like a factory reset —
-   agents, chats, scheduled tasks and the browser's logins all live in there.
-   Moving the folder keeps every one of them; only the API key has to be typed
-   again, because macOS keys its encryption to the old app name. */
+/* The app has been called Slava and Internall before InternAll. Electron
+   derives the data folder from the product name, so without this a rename
+   looks like a factory reset — agents, chats, scheduled tasks and the
+   browser's logins all live in there. Moving the folder keeps every one of
+   them; only the API key has to be typed again, because macOS keys its
+   encryption to the app name and will not hand the old secret to a new one.
+   (On a case-insensitive disk Internall and InternAll are already the same
+   folder, so that step is a no-op — it is here for case-sensitive ones.) */
+const FORMER_NAMES = ['Slava', 'Internall'];
+
 try {
   const support = app.getPath('appData');
-  const before = path.join(support, 'Slava');
-  const after = path.join(support, 'Internall');
-  if (fs.existsSync(before) && !fs.existsSync(after)) {
-    fs.renameSync(before, after);
-    console.log(`migrated data folder: ${before} -> ${after}`);
+  const after = path.join(support, app.getName());
+  if (!fs.existsSync(after)) {
+    const before = FORMER_NAMES.map((n) => path.join(support, n)).find((dir) => fs.existsSync(dir));
+    if (before) {
+      fs.renameSync(before, after);
+      console.log(`migrated data folder: ${before} -> ${after}`);
+    }
   }
 } catch (err) {
   console.error('could not migrate the old data folder:', err.message);
 }
 
 // ---------------------------------------------------------------------------
-// Persistent store  (~/Library/Application Support/Internall/slava-data.json)
+// Persistent store  (~/Library/Application Support/InternAll/internall-data.json)
 //
 // Messages are stored in a provider-neutral shape so an agent can be moved
 // between OpenAI and Anthropic without losing its history:
@@ -753,18 +760,51 @@ function tickTasks() {
     send('tasks:changed', { agentId: agent.id });
 
     const text = `⏰ Scheduled task (${label}):\n${t.instruction}`;
+    scheduled.add(agent.id);
     deliverUserMessage(agent, text, { scheduled: true })
       .then(() => notifyTaskDone(agent, t))
       .catch((err) => console.error('Scheduled run failed:', err));
   }
 }
 
-function notifyTaskDone(agent, task) {
+/* Agents whose current run was started by the scheduler rather than by you. */
+const scheduled = new Set();
+
+/** True when the user is looking at this agent's chat right now. */
+function watching(agentId) {
+  return Boolean(win) && !win.isDestroyed() && win.isFocused() && store.activeId === agentId;
+}
+
+/* Markdown reads badly in a notification, which is one unstyled line of text:
+   strip it to the words rather than showing asterisks and link syntax. */
+function notificationBody(agent) {
   const last = agent.messages[agent.messages.length - 1];
-  const body = last?.role === 'assistant' ? (last.blocks || []).filter((b) => b.type === 'text').map((b) => b.text).join(' ').slice(0, 180) : '';
-  if (!body) return;
+  if (last?.role !== 'assistant') return '';
+  return (last.blocks || [])
+    .filter((b) => b.type === 'text')
+    .map((b) => b.text)
+    .join(' ')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    .replace(/(\*\*|__|\*|_|~~)/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 180);
+}
+
+/** The one place a reply turns into a desktop notification. */
+function notifyReply(agent, subtitle) {
   if (!Notification.isSupported()) return;
-  const n = new Notification({ title: `${agent.name} · ${taskLabel(task)}`, body, silent: false });
+  const body = notificationBody(agent);
+  if (!body) return;
+
+  const n = new Notification({
+    title: subtitle ? `${agent.name} · ${subtitle}` : agent.name,
+    body,
+    silent: false,
+  });
   n.on('click', () => {
     if (win && !win.isDestroyed()) {
       win.show();
@@ -776,6 +816,8 @@ function notifyTaskDone(agent, task) {
   });
   n.show();
 }
+
+const notifyTaskDone = (agent, task) => notifyReply(agent, taskLabel(task));
 
 ipcMain.handle('usage:list', () =>
   store.agents
@@ -2071,6 +2113,12 @@ async function runAgent(agentId) {
     closeDanglingToolCalls(agent);
     running.delete(agentId);
     send('stream:end', { agentId });
+
+    // A reply you did not see arrive is worth a notification: the window is
+    // behind something, or you are reading a different chat. Scheduled runs
+    // notify themselves with the task name, so they are not doubled here.
+    if (!scheduled.has(agentId) && !watching(agentId)) notifyReply(agent);
+    scheduled.delete(agentId);
 
     // Messages sent from an app window while this run was in flight.
     const queued = pendingFromApps.get(agentId);
